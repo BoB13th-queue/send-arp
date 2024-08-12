@@ -12,6 +12,8 @@ syntax : send-arp <interface> <sender ip> <target ip> [<sender ip 2> <target ip 
 sample : send-arp wlan0 192.168.10.2 192.168.10.1
 ```
 
+## 결과
+![결과](img/image.png)
 
 ## 상세
 
