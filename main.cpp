@@ -39,7 +39,7 @@ void getMyMacAddr(const char* interfaceName, Mac& myMac, Ip& myIp) {
             	
                 ostringstream oss;
                 struct sockaddr_ll *s = (struct sockaddr_ll*)ifa->ifa_addr;
-                for (int i = 0; i < s->sll_halen; i++) {
+                for (int i = 0; i < (s->sll_halen); i++) {
                     oss << hex << setfill('0') << setw(2) << static_cast<int>(s->sll_addr[i]);
                     if (i != s->sll_halen - 1) oss << ":";
                 }
@@ -70,7 +70,7 @@ void getMacAddrFromSendArp(pcap_t* handle, const Ip myIp, const Mac myMac, const
 
 	// * 2. get MAC address from ARP reply
 	int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
-	if (res!= 0) {
+	if (res) {
         fprintf(stderr, "pcap_sendpacket error: %s\n", pcap_geterr(handle));
 		exit(EXIT_FAILURE);
         return;
@@ -82,9 +82,9 @@ void getMacAddrFromSendArp(pcap_t* handle, const Ip myIp, const Mac myMac, const
         const u_char* replyPacket;
 
         res = pcap_next_ex(handle, &header, &replyPacket);
-        if (res == 0) {
-            continue; // Timeout, no packet captured, continue listening
-        } else if (res < 0) {
+        if (!res) continue;
+
+		if (res < 0) {
             fprintf(stderr, "pcap_next_ex error: %s\n", pcap_geterr(handle));
             exit(EXIT_FAILURE);
         }
@@ -130,7 +130,7 @@ void send_arp_attack_packet(pcap_t* handle, const char* senderIpStr, const char*
 	packet.arp_.tip_ = htonl(senderIp);
 
 	int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
-	if (res != 0) {
+	if (res) {
 		fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr(handle));
 		exit(EXIT_FAILURE);
 	}
@@ -152,7 +152,7 @@ int main(int argc, char* argv[]) {
 	char* dev = argv[1];
 	char errbuf[PCAP_ERRBUF_SIZE];
 	pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1, errbuf);
-	if (handle == nullptr) {
+	if (!handle) {
 		fprintf(stderr, "couldn't open device %s(%s)\n", dev, errbuf);
 		return -1;
 	}
